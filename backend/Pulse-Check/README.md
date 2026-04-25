@@ -1,156 +1,212 @@
-# Pulse-Check-API ("Watchdog" Sentinel)
+# Pulse-Check API — Dead Man's Switch Watchdog
 
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
-
-## 1. Business Context
-
-> **Client:** _CritMon Servers Inc._ (A Critical Infrastructure Monitoring Company).
-
-### The Problem
-
-CritMon provides monitoring for remote solar farms and unmanned weather stations in areas with poor connectivity. These devices are supposed to send "I'm alive" signals every hour.
-
-Currently, CritMon has no way of knowing if a device has gone offline (due to power failure or theft) until a human manually checks the logs. They need a system that alerts _them_ when a device _stops_ talking.
-
-### The Solution
-
-You need to build a **Dead Man’s Switch API**. Devices will register a "monitor" with a countdown timer (e.g., 60 seconds). If the device fails to "ping" (send a heartbeat) to the API before the timer runs out, the system automatically triggers an alert.
+A backend service for CritMon Servers Inc. Remote devices register a monitor with a countdown timer. If the device fails to send a heartbeat before the timer reaches zero, the system fires an alert. Built with Java 17 and Spring Boot 3.3.
 
 ---
 
-## 2. Technical Objective
+## Architecture
 
-Build a backend service that manages stateful timers.
+### State Diagram
 
-- **Registration:** Allow a client to create a monitor with a specific timeout duration.
-- **Heartbeat:** Reset the countdown when a ping is received.
-- **Trigger:** Fire a webhook (or log a critical error) if the countdown reaches zero.
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE : POST /monitors (register)
+    ACTIVE --> ACTIVE : POST /{id}/heartbeat (reset timer)
+    ACTIVE --> PAUSED : POST /{id}/pause
+    ACTIVE --> DOWN : Timer expires (no heartbeat)
+    PAUSED --> ACTIVE : POST /{id}/heartbeat (unpause + reset)
+    DOWN --> ACTIVE : POST /{id}/heartbeat (reactivate)
+```
 
----
+### Sequence Diagram
 
-## 3. Getting Started
+```mermaid
+sequenceDiagram
+    participant Device
+    participant API
+    participant Scheduler
+    participant Console
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**.
-3.  **Submission:** Your final submission will be a link to your forked repository containing:
-    - The source code.
-    - The **Architecture Diagram**
-    - The `README.md` with documentation.
+    Device->>API: POST /monitors {id, timeout, alert_email}
+    API->>Scheduler: schedule alert in T seconds
+    API-->>Device: 201 Created
 
----
+    loop Every heartbeat cycle
+        Device->>API: POST /monitors/{id}/heartbeat
+        API->>Scheduler: cancel previous ScheduledFuture
+        API->>Scheduler: reschedule alert in T seconds
+        API-->>Device: 200 OK
+    end
 
-## 4. The Architecture Diagram
-
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **State Flowchart** embedded in your `README.md`.
-
----
-
-## 5. User Stories & Acceptance Criteria
-
-### User Story 1: Registering a Monitor
-
-**As a** device administrator,
-**I want to** create a new monitor for my device,
-**So that** the system knows to track its status.
-
-**Acceptance Criteria:**
-
-- [ ] The API accepts a `POST /monitors` request.
-- [ ] Input: `{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}`.
-- [ ] The system starts a countdown timer for 60 seconds associated with `device-123`.
-- [ ] Response: `201 Created` with a confirmation message.
-
-### User Story 2: The Heartbeat (Reset)
-
-**As a** remote device,
-**I want to** send a signal to the server,
-**So that** my timer is reset and no alert is sent.
-
-**Acceptance Criteria:**
-
-- [ ] The API accepts a `POST /monitors/{id}/heartbeat` request.
-- [ ] If the ID exists and the timer has NOT expired:
-  - [ ] Restart the countdown from the beginning (e.g., reset to 60 seconds).
-  - [ ] Return `200 OK`.
-- [ ] If the ID does not exist:
-  - [ ] Return `404 Not Found`.
-
-### User Story 3: The Alert (Failure State)
-
-**As a** support engineer,
-**I want to** be notified immediately if a device stops sending heartbeats,
-**So that** I can deploy a repair team.
-
-**Acceptance Criteria:**
-
-- [ ] If the timer for `device-123` reaches 0 seconds (no heartbeat received):
-  - [ ] The system must internally "fire" an alert.
-  - [ ] **Implementation:** For this project, simply `console.log` a JSON object: `{"ALERT": "Device device-123 is down!", "time": <timestamp>}`. (Or simulate sending an email).
-  - [ ] The monitor status changes to `down`.
+    Note over Scheduler: T seconds elapsed with no heartbeat
+    Scheduler->>API: fireAlert(monitor)
+    API->>API: monitor.status = DOWN
+    API->>Console: log {"ALERT": "Device X is down!", "time": "..."}
+```
 
 ---
 
-## 6. Bonus User Story (The "Snooze" Button)
+## Tech Stack
 
-**As a** maintenance technician,
-**I want to** pause monitoring while I am repairing a device,
-**So that** I don't trigger false alarms.
-
-**Acceptance Criteria:**
-
-- [ ] Create a `POST /monitors/{id}/pause` endpoint.
-- [ ] When called, the timer stops completely. No alerts will fire.
-- [ ] Calling the heartbeat endpoint again automatically "un-pauses" the monitor and restarts the timer.
-
----
-
-## 7. The "Developer's Choice" Challenge
-
-We value engineers who look for "what's missing."
-
-**Task:** Identify **one** additional feature that makes this system more robust or user-friendly.
-
-1.  **Implement it.**
-2.  **Document it:** Explain _why_ you added it in your README.
+| Component | Technology |
+|-----------|------------|
+| Language | Java 17 |
+| Framework | Spring Boot 3.3 |
+| Build | Maven |
+| Storage | `ConcurrentHashMap` (in-memory) |
+| Timers | `ScheduledExecutorService` / `ScheduledFuture` |
+| Tests | JUnit 5, Mockito, Spring MockMvc |
 
 ---
 
-## 8. Documentation Requirements
+## Setup
 
-Your final `README.md` must replace these instructions. It must cover:
+### Prerequisites
 
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation**
-4.  **The Developer's Choice:** Explanation of your added feature.
+- Java 17+
+- Maven 3.6+
 
----
+### Run the application
 
-Submit your repo link via the [online](https://forms.cloud.microsoft/e/bLyGT3byxx) form.
+```bash
+mvn clean install
+mvn spring-boot:run
+```
 
-## 🛑 Pre-Submission Checklist
+The API starts on **http://localhost:8080**.
 
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
+### Run tests
 
-### 1. 📂 Repository & Code
-
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
-
-### 2. 📄 Documentation (Crucial)
-
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
-
-### 3. 🧹 Git Hygiene
-
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
+```bash
+mvn test
+```
 
 ---
 
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+## API Documentation
+
+### POST /monitors — Register a Monitor
+
+Starts a countdown timer for the device. If no heartbeat arrives within `timeout` seconds, an alert is fired.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/monitors \
+  -H "Content-Type: application/json" \
+  -d '{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}'
+```
+
+**Response 201 Created:**
+```json
+{
+  "message": "Monitor device-123 registered successfully",
+  "id": "device-123"
+}
+```
+
+**Response 409 Conflict** (duplicate ID):
+```json
+{
+  "error": "Monitor already exists: device-123"
+}
+```
+
+---
+
+### POST /monitors/{id}/heartbeat — Send Heartbeat
+
+Resets the countdown. If the monitor was paused, it is automatically unpaused and the timer restarts.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/monitors/device-123/heartbeat
+```
+
+**Response 200 OK:**
+```json
+{
+  "message": "Heartbeat received for device-123"
+}
+```
+
+**Response 404 Not Found:**
+```json
+{
+  "error": "Monitor not found: device-123"
+}
+```
+
+---
+
+### POST /monitors/{id}/pause — Pause a Monitor
+
+Stops the countdown. No alerts will fire while paused. Sending a heartbeat automatically unpauses.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/monitors/device-123/pause
+```
+
+**Response 200 OK:**
+```json
+{
+  "message": "Monitor device-123 paused"
+}
+```
+
+**Response 404 Not Found:**
+```json
+{
+  "error": "Monitor not found: device-123"
+}
+```
+
+---
+
+### GET /monitors/{id} — Get Monitor Status *(Developer's Choice)*
+
+Returns the current state of a monitor, including the live remaining seconds before the next alert.
+
+**Request:**
+```bash
+curl http://localhost:8080/monitors/device-123
+```
+
+**Response 200 OK:**
+```json
+{
+  "id": "device-123",
+  "status": "active",
+  "remainingSeconds": 42,
+  "alertEmail": "admin@critmon.com"
+}
+```
+
+Possible `status` values: `active`, `paused`, `down`
+
+**Response 404 Not Found:**
+```json
+{
+  "error": "Monitor not found: device-123"
+}
+```
+
+---
+
+## Alert Output
+
+When a timer expires the following is logged to stderr:
+
+```
+{"ALERT": "Device device-123 is down!", "time": "2026-04-24T10:30:00.000Z"}
+```
+
+---
+
+## Developer's Choice: Status Endpoint
+
+`GET /monitors/{id}` was added to give operators real-time visibility without waiting for an alert. The `remainingSeconds` field reads directly from `ScheduledFuture.getDelay()` — it reflects the live countdown, not a stored value. This enables:
+
+- **Dashboards** — display the health of all devices at a glance.
+- **Debugging** — confirm a device is actively reporting in after a maintenance window.
+- **Alerting integrations** — poll this endpoint to drive external notification systems.
