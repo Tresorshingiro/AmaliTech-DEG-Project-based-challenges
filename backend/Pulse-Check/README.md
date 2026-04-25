@@ -10,12 +10,12 @@ A backend service for CritMon Servers Inc. Remote devices register a monitor wit
 
 ```mermaid
 stateDiagram-v2
-    [*] --> ACTIVE : POST /monitors (register)
-    ACTIVE --> ACTIVE : POST /{id}/heartbeat (reset timer)
+    [*] --> ACTIVE : POST /monitors
+    ACTIVE --> ACTIVE : heartbeat (reset)
     ACTIVE --> PAUSED : POST /{id}/pause
-    ACTIVE --> DOWN : Timer expires (no heartbeat)
-    PAUSED --> ACTIVE : POST /{id}/heartbeat (unpause + reset)
-    DOWN --> ACTIVE : POST /{id}/heartbeat (reactivate)
+    ACTIVE --> DOWN : timeout expires
+    PAUSED --> ACTIVE : heartbeat (unpause)
+    DOWN --> ACTIVE : heartbeat (reactivate)
 ```
 
 ### Sequence Diagram
